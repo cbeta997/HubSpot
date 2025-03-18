@@ -1,0 +1,118 @@
+const axios = require('axios');
+const crypto = require('crypto');
+
+exports.main = async (event, callback) => {
+  try {
+    // ✅ Retrieve input fields from HubSpot
+    let agencyCompanyId = event.inputFields['agency_company_id'];
+    const accountId = event.inputFields['account_id'];
+    const submissionId = event.inputFields['submission_id'];
+    let dotNumber = event.inputFields['dot_number'];
+    const vehicleCount = event.inputFields['vehicle_count'];
+    const driverCount = event.inputFields['driver_count'];
+
+    // ✅ Convert `agency_company_id` and `dot_number` to integers
+    agencyCompanyId = parseInt(agencyCompanyId, 10);
+    dotNumber = parseInt(dotNumber, 10);
+
+    // ✅ Validate the conversions
+    if (isNaN(agencyCompanyId)) {
+      throw new Error("Invalid agency_company_id. It must be a numeric value.");
+    }
+    if (isNaN(dotNumber)) {
+      throw new Error("Invalid dot_number. It must be a numeric value.");
+    }
+
+    // ✅ Ensure `calling_application` is always `"hubspot_prod"`
+    const callingApplication = "hubspot_prod";
+
+    // ✅ Construct query parameters
+    const queryString = new URLSearchParams({
+      agency_company_id: agencyCompanyId,
+      account_id: accountId,
+      submission_id: submissionId,
+      dot_number: dotNumber,
+      vehicle_count: vehicleCount,
+      driver_count: driverCount,
+      calling_application: callingApplication
+    }).toString();
+
+    // ✅ Use only the URI path, not the full URL
+    const requestUri = `/v1/customer-score/quote?${queryString}`;
+    const fullUrl = `https://api-drivesmart.dev.coverwhale.dev${requestUri}`;
+
+    // ✅ Generate the current timestamp
+    const timestamp = Date.now().toString();
+
+    // ✅ Client Secret (Make sure this is the correct secret for the Dev environment)
+    const clientSecret = 'e2f87daa-d622-47d7-bc13-3e4dfd6b06cf';
+
+    // ✅ Generate HMAC-SHA256 Signature
+    const requestMethod = "GET";
+    const requestBody = "";
+    const messageString = requestMethod + requestUri + requestBody + timestamp;
+
+    console.log("Message String for Signature:", messageString);
+
+    const hubSpotSignature = crypto
+      .createHmac('sha256', clientSecret)
+      .update(messageString, 'utf-8')
+      .digest('base64');
+
+    // ✅ Define headers (WITH SIGNATURE)
+    const headers = {
+      'X-Hubspot-Signature-V3': hubSpotSignature,
+      'X-Hubspot-Request-Timestamp': timestamp,
+      'Content-Type': 'application/json',
+      'X-Original-Method': requestMethod,
+      'X-Original-Uri': requestUri,
+      'X-Forwarded-Scheme': 'https'
+    };
+
+    // ✅ Log request details
+    console.log("Generated Headers:", headers);
+    console.log("Request URL:", fullUrl);
+    console.log("Signature Base String:", messageString);
+    console.log("Generated Signature:", hubSpotSignature);
+    console.log("Current Timestamp:", timestamp);
+
+    // ✅ Send the GET request
+    const response = await axios.get(fullUrl, { headers });
+
+    // ✅ Log full response details
+    console.log("Full API Response:", response.data);
+
+    // ✅ Extract customer score and quintile
+    const customerScore = response.data.customer_score;
+    const customerScoreQuintile = response.data.customer_score_quintile;
+
+    // ✅ Return extracted values separately for later use
+    callback({
+      outputFields: {
+        status: 'success',
+        customer_score: customerScore,
+        customer_score_quintile: customerScoreQuintile,
+        full_api_response: response.data  // Keeping the full response if needed
+      },
+    });
+
+  } catch (error) {
+    // ✅ Log full error response details
+    console.error('Error:', error.message);
+    if (error.response) {
+      console.error('Error Response Status:', error.response.status);
+      console.error('Error Response Headers:', error.response.headers);
+      console.error('Error Response Data:', error.response.data);
+    }
+
+    callback({
+      outputFields: {
+        status: 'error',
+        errorMessage: error.message,
+        response_status: error.response ? error.response.status : null,
+        response_headers: error.response ? error.response.headers : null,
+        response_data: error.response ? error.response.data : 'No response data',
+      },
+    });
+  }
+};
