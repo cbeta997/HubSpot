@@ -1,0 +1,157 @@
+const axios = require('axios');
+
+// Utility to pause between requests (optional to help avoid 429 errors even more)
+async function delay(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+exports.main = async (event, callback) => {
+  try {
+    // 1) Pull the dotNumber from workflow input
+    const dotNumber = event.inputFields['dot_number'];
+
+    // 2) Get HubSpot API key (or Private App token) from environment variables
+    const hubspotApiKey = process.env.hapikey;
+    if (!hubspotApiKey) {
+      throw new Error('HubSpot API key/token is not defined in environment variables');
+    }
+
+    // 3) Paginate to find all matching deals
+    let allDeals = [];
+    let hasMore = true;
+    let after = 0;
+
+    while (hasMore) {
+      const payload = {
+        filterGroups: [
+          {
+            filters: [
+              {
+                propertyName: 'pipeline',
+                operator: 'EQ',
+                value: '36304513'
+              },
+              {
+                propertyName: 'dot_number',
+                operator: 'EQ',
+                value: dotNumber
+              },
+              {
+                propertyName: 'dealstage',
+                operator: 'NEQ',
+                value: '78394146'
+              },
+              {
+                propertyName: 'dealstage',
+                operator: 'NEQ',
+                value: '78394147'
+              }
+            ]
+          }
+        ],
+        properties: ['dealname', 'dealstage', 'dot_number'],
+        limit: 100,
+        after: after
+      };
+
+      const response = await axios.post(
+        'https://api.hubapi.com/crm/v3/objects/deals/search',
+        payload,
+        {
+          headers: {
+            'Authorization': `Bearer ${hubspotApiKey}`,
+            'Content-Type': 'application/json'
+          }
+        }
+      );
+
+      const results = response.data.results || [];
+      allDeals = allDeals.concat(results);
+
+      if (response.data.paging && response.data.paging.next) {
+        after = response.data.paging.next.after;
+      } else {
+        hasMore = false;
+      }
+    }
+
+    // 4) If no deals found, just return
+    if (allDeals.length === 0) {
+      return callback({
+        outputFields: {
+          deals_json: JSON.stringify([]),
+          updated_deal_count: 0,
+          message: 'No deals match the search criteria.'
+        }
+      });
+    }
+
+    // 5) Batch update in chunks of 100
+    //    Each input object must have an "id" and a "properties" object
+    const BATCH_SIZE = 100;
+    let updatedCount = 0;
+
+    // We'll store any failed updates or partial errors here
+    let errors = [];
+
+    for (let i = 0; i < allDeals.length; i += BATCH_SIZE) {
+      const chunk = allDeals.slice(i, i + BATCH_SIZE);
+
+      // Build the batch payload
+      const inputs = chunk.map(deal => ({
+        id: deal.id,
+        properties: {
+          dealstage: '78394147',
+          quote_lost_reason: 'duplicate_bound'
+        }
+      }));
+
+      const batchPayload = { inputs };
+
+      try {
+        // Optional small delay before each batch to reduce 429 risk
+        // await delay(200);
+
+        const batchResponse = await axios.post(
+          'https://api.hubapi.com/crm/v3/objects/deals/batch/update',
+          batchPayload,
+          {
+            headers: {
+              'Authorization': `Bearer ${hubspotApiKey}`,
+              'Content-Type': 'application/json'
+            }
+          }
+        );
+
+        // Each successful record is in the response (or no content if all succeeded)
+        // Generally, if there's a partial failure, it should appear under `batchResponse.data.results[x].status`
+        // or an error object. You can refine your error handling as needed.
+
+        updatedCount += chunk.length;
+      } catch (error) {
+        console.error('Batch update error:', error.message);
+        errors.push(error.message);
+      }
+    }
+
+    // 6) Return final results
+    callback({
+      outputFields: {
+        deals_json: JSON.stringify(allDeals),
+        updated_deal_count: updatedCount,
+        error_list: JSON.stringify(errors)
+      }
+    });
+
+  } catch (error) {
+    console.error('Error in coded action:', error.message);
+    callback({
+      outputFields: {
+        deals_json: '[]',
+        updated_deal_count: 0,
+        error: error.message
+      }
+    });
+  }
+};
+
