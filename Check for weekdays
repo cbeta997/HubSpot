@@ -1,0 +1,47 @@
+function calculateCorrectEldDeadline(bindingTimestamp) {
+  // Convert Unix timestamp (milliseconds since Epoch) to Date object
+  let date = new Date(Number(bindingTimestamp));
+
+  // Validate the date
+  if (isNaN(date.getTime())) {
+    throw new Error('Invalid date value from timestamp');
+  }
+
+  // Add 9 days to get the initial 9th day
+  date.setDate(date.getDate() + 35);
+
+  // Check if the 9th day falls on a weekend and adjust
+  const dayOfWeek = date.getDay(); // Get day of the week, where 0 is Sunday and 6 is Saturday
+  if (dayOfWeek === 0) { // If the 9th day is Sunday
+    date.setDate(date.getDate() - 2); // Set to Friday
+  } else if (dayOfWeek === 6) { // If the 9th day is Saturday
+    date.setDate(date.getDate() - 1); // Set to Friday
+  }
+  
+  // Return the deadline as Unix timestamp in milliseconds
+  return date.getTime();
+}
+
+exports.main = async (event, callback) => {
+  try {
+    // Retrieve the binding timestamp from HubSpot's input fields
+    const bindingTimestamp = event.inputFields['today_s_date'];
+
+    // Calculate the ELD connection deadline
+    const eldDeadlineTimestamp = calculateCorrectEldDeadline(bindingTimestamp);
+    
+    // Return the calculated deadline as a Unix timestamp for further use
+    callback({
+      outputFields: {
+        eldDeadlineTimestamp: eldDeadlineTimestamp
+      }
+    });
+  } catch (error) {
+    console.error(`Error in custom action: ${error.message}`);
+    callback({
+      outputFields: {
+        error: "Error in custom action: " + error.message
+      }
+    });
+  }
+};
