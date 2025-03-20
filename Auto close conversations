@@ -1,0 +1,48 @@
+// Import the axios library for HTTP requests
+const axios = require('axios');
+
+exports.main = async (event, callback) => {
+  // Extract conversation ID from the event input fields
+  const conversationId = event.inputFields['hs_thread_id'];
+
+  try {
+    // Define the URL for updating the conversation's status
+    const url = `https://api.hubapi.com/conversations/v3/conversations/threads/${conversationId}`;
+
+    // Make the API request to set the conversation status to "CLOSED"
+    await axios({
+      method: 'patch',
+      url: url,
+      headers: {
+        'Authorization': `Bearer ${process.env.hapikey}`,
+        'Content-Type': 'application/json',
+      },
+      data: {
+        status: "CLOSED"
+      }
+    });
+
+    // Log success and return the status in the callback
+    console.log(`Successfully closed conversation ${conversationId}`);
+    callback({
+      outputFields: {
+        status: 'Closed',
+        conversation_id: conversationId,
+      },
+    });
+  } catch (error) {
+    // Handle errors and return them in outputFields for debugging
+    console.log(`Error closing conversation ${conversationId}: ${error}`);
+    if (error.response) {
+      console.log('Response data:', error.response.data);
+      console.log('Response status:', error.response.status);
+      console.log('Response headers:', error.response.headers);
+    }
+    callback({
+      outputFields: {
+        status: 'Failed',
+        error: "Error closing conversation",
+      },
+    });
+  }
+};
